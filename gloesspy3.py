@@ -143,7 +143,7 @@ def phase_mjds(jds, period):
         phase = (jds / period) - np.floor(jds/ period)
         return(phase)
 
-def old_gloess_to_df(filename):
+def old_gloess_to_df(filename, ref_col=False):
     """ takes .gloess_in formatted file as input 
     returns gloess_input, period, smoothing
     where gloess_input = dataframe
@@ -158,14 +158,22 @@ def old_gloess_to_df(filename):
             return(1)
     
     """ setting up the dataframe stuff """
-    old_gloess_bands = ['U', 'B', 'V', 'R', 'I', 'J','H', 'K', 'IRAC1', 'IRAC2', 'IRAC3', 'IRAC4']
+    old_gloess_bands = ['U', 'B', 'V', 'R', 'I', 'J','H', 'Ks', 'IRAC1', 'IRAC2', 'IRAC3', 'IRAC4']
     filters = np.array(old_gloess_bands)
-    names = set_up_dataframe_cols(filters)
     n_cols = int(len(filters)*2.)
-    """ have to do this part because some old gloess files have a column with the reference, some don't
-    might implement reference filtering later
-    """
-    cols_list = (np.linspace(0,n_cols, n_cols+1)).astype(int)
+    print(ref_col)
+    if ref_col==False:
+        """ have to do this part because some old gloess files have a column with the reference, some don't
+        might implement reference filtering later
+        """
+        cols_list = (np.linspace(0,n_cols, n_cols+1)).astype(int)
+        names = set_up_dataframe_cols(filters)
+
+    if ref_col==True:
+        cols_list = (np.linspace(0,n_cols+1, n_cols+2)).astype(int)
+        names = set_up_dataframe_cols(filters)
+        names = np.append(names, 'Reference')
+
     """ gloess_input is dataframe with the mjds, mags, errs. 
     bad mags replaced with np.nan rather than 99.99"""
     gloess_input = pd.read_csv(filename, skiprows=4, names=names, delim_whitespace=True, usecols=cols_list)
@@ -178,6 +186,7 @@ def old_gloess_to_df(filename):
     mag_cols = [c for c in names if 'mag' in c]
     for c in mag_cols:
         gloess_input[c].replace(99.99, np.NaN, inplace=True)
+    
     return(gloess_input, period, smoothing)
 
 def read_gaia_epoch_photometry_from_file(filename):
@@ -280,9 +289,13 @@ def read_gaia_epoch_photometry_from_query(source_id):
 
     return(df)
 
-def fit_gloess_from_gaia_query(source_id, period='query', period_col='pf'):
+def fit_gloess_from_gaia_query(source_id, period='query', period_col='pf', vartype='cep'):
     df = read_gaia_epoch_photometry_from_query(source_id)
-    query = f"select source_id, {period_col} from gaiadr3.vari_cepheid where source_id in ({source_id})"
+    if vartype=='cep':
+        query = f"select source_id, {period_col} from gaiadr3.vari_cepheid where source_id in ({source_id})"
+    elif vartype=='rrl':
+        query = f"select source_id, {period_col} from gaiadr3.vari_rrlyrae where source_id in ({source_id})"
+
     job     = Gaia.launch_job_async(query)
     if period=='query':
         per = job.get_results()[period_col][0]
@@ -303,13 +316,17 @@ def fit_gloess_from_gaia_query(source_id, period='query', period_col='pf'):
 
     return(fit_results, per, df, gloess)
 
-def plot_gaia_gloess_fits(fit_results, df, gloess, source_id, period, save_pdf=True, alt_id=''):
+def plot_gaia_gloess_fits(fit_results, df, gloess, source_id, period, save_pdf=True, alt_id='', show_means=False):
     fake_phases = -0.99 + 0.01*(np.arange(0,500))
     ax_min = 99.
     ax_max = -99.
 
     colours = ['Blue', 'Green', 'Red']
     filters = ['BP', 'G', 'RP']
+    av_mags = np.ones(len(filters)) * np.nan
+    int_av_mags = np.ones(len(filters)) * np.nan
+    amps = np.ones(len(filters)) * np.nan
+
 
     fig = plt.figure(figsize=(10,6))
     ax = fig.add_subplot(1,1,1)
@@ -324,6 +341,11 @@ def plot_gaia_gloess_fits(fit_results, df, gloess, source_id, period, save_pdf=T
         xp = gloess.phase_mjds(xx, period)
         ax.errorbar(np.concatenate((xp, xp+1)), np.concatenate((yy,yy)),yerr=np.concatenate((yerr,yerr)), marker='o',ls='None', label=band, ms=5, color=colours[i])
         ax.plot(fake_phases[200:400]-1, fit_results[i, 200:400], 'k-')
+
+        if show_means==True:
+            av_mags[i], int_av_mags[i], amps[i] = get_lc_stats(fit_results[i, 200:400])
+            ax.axhline(av_mags[i], xmin=fake_phases.min(), xmax=fake_phases.max(), color='k', ls='--', label='Mean mag')
+            ax.axhline(int_av_mags[i], xmin=fake_phases.min(), xmax=fake_phases.max(), color='k', ls='-.', label='Flux averaged mag')
     
         band_min = fit_results[i, 200:300].min()
         band_max = fit_results[i, 200:300].max()
@@ -348,11 +370,14 @@ def plot_gaia_gloess_fits(fit_results, df, gloess, source_id, period, save_pdf=T
         plt.close()
     return(fn)
 
-def gaia_gloess_fit_and_plot(source_id, period='query', period_col='pf', plot=True, save_pdf=True, save_fit=True, alt_id = ''):
+def gaia_gloess_fit_and_plot(source_id, period='query', period_col='pf', plot=True, save_pdf=True, save_fit=True, alt_id = '', vartype='cep', show_means=False, obs_dates=False, start_dates=np.NaN, end_dates=np.NaN):
     print(f'Fitting Gaia DR3 {source_id}')
-    fit_results, period, df, gloess, = fit_gloess_from_gaia_query(source_id, period, period_col)
+    fit_results, gaia_period, df, gloess, = fit_gloess_from_gaia_query(source_id, period, period_col, vartype=vartype)
     if plot==True:
-        fn = plot_gaia_gloess_fits(fit_results, df, gloess, source_id, period, save_pdf, alt_id)
+        if obs_dates==True:
+            fn=plot_observing_dates(fit_results, df, gloess, source_id, gaia_period, start_dates, end_dates, save_pdf, alt_id, show_means=show_means)
+        else:
+            fn = plot_gaia_gloess_fits(fit_results, df, gloess, source_id, gaia_period, save_pdf, alt_id, show_means=show_means)
         print(f'saved lightcurve plot to {fn}')
     if save_fit==True:
         fake_phases = -0.99 + 0.01*(np.arange(0,500))
@@ -363,14 +388,113 @@ def gaia_gloess_fit_and_plot(source_id, period='query', period_col='pf', plot=Tr
             band = filters[i]
             mag_col = 'mag_' + band
             df_fit[mag_col] = fit_results[i, 200:400]
-        fit_csv = 'GaiaDR3' + str(source_id) + '_gloess_fit.csv'
+        fit_csv = 'GaiaDR3_' + str(source_id) + '_gloess_fit.csv'
         print(fit_csv)
         df_fit.to_csv(fit_csv, index=False, float_format='%.4f')
         print(f'Saved gloess fit to {fit_csv}')
     
     return(fit_results, period, df, gloess)
+
+def clean_old_gloess_file(filename):
+    df, period, smoothing = gf.old_gloess_to_df(filename, ref_col=True)
+    bad_refs = []
+    bad_ref_files = ['bad_references_list.txt', 'johnson_system_references.txt', 'not_irac_references.txt']
+    for file in bad_ref_files:
+        with open('/Users/vs522/Dropbox/Python/oo_gloess/'+file) as fn:
+            for line in fn:
+                line = line.strip()
+                bad_refs.append(line)
+    df = df[~df['Reference'].isin(bad_refs)]
+    df['MJD'].replace(-99.99, np.NaN, inplace=True)
+    df.dropna(subset=['MJD'], inplace=True)
+    return(df, period, smoothing)
+
+def get_lc_stats(fit_results):
+    """ Determine statistics of fitted lightcurve from gloess
+        av_mag = mean of mag values
+        int_av_mag = flux averaged mag
+        amp = amplitude
+    """
+    if len(fit_results) <= 200:
+        mags = fit_results
+    else:
+        mags = fit_results[200:400]
+    av_mag = np.mean(mags)
+    fluxes = 10**(-mags/2.5)
+    av_flux = np.mean(fluxes)
+    int_av_mag = -2.5*np.log10(av_flux)
+    amp = np.max(mags) - np.min(mags)
+    return(av_mag, int_av_mag, amp)
+
+def plot_observing_dates(fit_results, df, gloess, source_id, period, start_dates, end_dates, save_pdf=True, alt_id='', show_means=False):
+    fake_phases = -0.99 + 0.01*(np.arange(0,500))
+    ax_min = 99.
+    ax_max = -99.
+
+    colours = ['Blue', 'Green', 'Red']
+    filters = ['BP', 'G', 'RP']
+    av_mags = np.ones(len(filters)) * np.nan
+    int_av_mags = np.ones(len(filters)) * np.nan
+    amps = np.ones(len(filters)) * np.nan
+
+
+    fig = plt.figure(figsize=(10,6))
+    ax = fig.add_subplot(1,1,1)
+    for i in range(len(filters)):
+        band = filters[i]
+        mag_col = 'mag_' + band
+        err_col = 'err_' + band
+        xx = df['MJD']
+        yy = df[mag_col]
+        yerr = df[err_col]
+
+        xp = gloess.phase_mjds(xx, period)
+        ax.errorbar(np.concatenate((xp, xp+1)), np.concatenate((yy,yy)),yerr=np.concatenate((yerr,yerr)), marker='o',ls='None', label=band, ms=5, color=colours[i])
+        ax.plot(fake_phases[200:400]-1, fit_results[i, 200:400], 'k-')
+
+        if show_means==True:
+            av_mags[i], int_av_mags[i], amps[i] = get_lc_stats(fit_results[i, 200:400])
+            ax.axhline(av_mags[i], xmin=fake_phases.min(), xmax=fake_phases.max(), color='k', ls='--', label='Mean mag')
+            ax.axhline(int_av_mags[i], xmin=fake_phases.min(), xmax=fake_phases.max(), color='k', ls='-.', label='Flux averaged mag')
     
+        band_min = fit_results[i, 200:300].min()
+        band_max = fit_results[i, 200:300].max()
     
+        if band_min < ax_min:
+            ax_min = band_min
+        if band_max > ax_max:
+            ax_max = band_max
+    if len(alt_id) > 0:
+        ax.set_title(f'{alt_id}, Gaia DR3 {source_id}, P = {period:.5f} d')
+    else:
+        ax.set_title(f'Gaia DR3 {source_id}, P = {period:.5f} d')
+    ax.set_xlabel('Phase')
+    ax.set_ylabel('Magnitude')
+    
+    gaia_jd0 = 2455197.5
+
+    for i in range(len(start_dates)):
+        start_time = start_dates[i].to_value('jd') - gaia_jd0
+        end_time = end_dates[i].to_value('jd') - gaia_jd0
+
+        start_phase = (start_time / period) - np.floor(start_time/ period)
+        end_phase = (end_time / period) - np.floor(end_time/ period)
+        ax.axvspan(start_phase, end_phase, alpha=.5, color='gold')
+        ax.axvspan(start_phase+1, end_phase+1, alpha=.5, color='gold')
+        ax.annotate(i+1, xy=(start_phase, ax_min - 0.1), xycoords='data', weight='bold')
+        ax.annotate(i+1, xy=(start_phase+1, ax_min - 0.1), xycoords='data', weight='bold')
+
+
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles[::-1], labels[::-1])
+    ax.axis([0,2,ax_max+0.2, ax_min-0.2])
+    if save_pdf==True:
+        fn = alt_id.replace(' ', '_') + '_gloess_lc.pdf'
+        #fn = 'GaiaDR3_' + str(source_id) + '_gloess_lc.pdf'
+        plt.savefig(fn)
+        plt.close()
+    return(fn)
+
 
 
  
