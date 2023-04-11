@@ -7,6 +7,10 @@ import astropy.io.votable as vot
 
 from astroquery.gaia import Gaia
 import matplotlib.pyplot as plt
+import sys
+sys.path.append('../useful_scripts/')
+import vickys_useful_functions as vs
+
 
 
 np.seterr(divide='ignore')
@@ -143,6 +147,11 @@ def phase_mjds(jds, period):
         phase = (jds / period) - np.floor(jds/ period)
         return(phase)
 
+def phase_jds_gaia(jds, period, gaia_offset = 2455197.5):
+    gjds = jds - gaia_offset
+    phase = (gjds / period) - np.floor(gjds/ period)
+    return(phase)
+
 def old_gloess_to_df(filename, ref_col=False):
     """ takes .gloess_in formatted file as input 
     returns gloess_input, period, smoothing
@@ -180,8 +189,14 @@ def old_gloess_to_df(filename, ref_col=False):
     """ getting the period and the smoothing paramters from the file """
     with open(filename, 'r') as fp:
         period, smoothing = [x.strip() for ei,x in enumerate(fp) if ei in [1,3]]
-    period = float(period)
-    smoothing = np.fromstring(smoothing, sep=" ")
+    if type(period) == float:
+        period = float(period)
+    else:
+        period = np.nan
+    if smoothing[0] == '[':
+        smoothing = np.nan
+    else:
+        smoothing = np.fromstring(smoothing, sep=" ")
     """ fixing the 99 -> np.nans"""
     mag_cols = [c for c in names if 'mag' in c]
     for c in mag_cols:
@@ -396,7 +411,7 @@ def gaia_gloess_fit_and_plot(source_id, period='query', period_col='pf', plot=Tr
     return(fit_results, period, df, gloess)
 
 def clean_old_gloess_file(filename):
-    df, period, smoothing = gf.old_gloess_to_df(filename, ref_col=True)
+    df, period, smoothing = old_gloess_to_df(filename, ref_col=True)
     bad_refs = []
     bad_ref_files = ['bad_references_list.txt', 'johnson_system_references.txt', 'not_irac_references.txt']
     for file in bad_ref_files:
@@ -495,6 +510,148 @@ def plot_observing_dates(fit_results, df, gloess, source_id, period, start_dates
         plt.close()
     return(fn)
 
+def check_jd_mjd(jd, is_gaia=False):
+    if is_gaia==False:
+        if jd > 2400000.5:
+            mjd = jd - 2400000.5
+        else:
+            mjd = jd
+    return(mjd)
+
+def combine_old_gloess_with_gaia(target, gloess_dir = '',vartype='cep',period='query', period_col='pf', plot=True, save_pdf=True, save_fit=True, alt_period = np.nan, save_df=True):
+    """ combine existing gloess data with gaia
+        queries gaia for period
+        defaults to cepheids and fundamental mode
+    """
+    if vartype=='cep':
+        vartable = 'vari_cepheid'
+    elif vartype=='rrl':
+        vartable = 'vari_rrlyrae'
+    else:
+        print("Options for vartype are 'cep' and 'rrl'. Please provide a valid option")
+        return(-1)
+
+    target_ns = target.replace(' ', '') ## get rid of spaces for file names
+    old_gloess_file = gloess_dir + target_ns + '.gloess_in'
+    if os.path.isfile(old_gloess_file)==False:
+        old_gloess_file = old_gloess_file + '.gloess_in'
+        if os.path.isfile(old_gloess_file)==False:
+            old_gloess_file = '/Users/vs522/Dropbox/All_Cepheids_ever/MilkyWay/cepheids/' + str.upper(target)
+            if os.path.isfile(old_gloess_file)==False:
+                print("input file doesn't exist")
+                return(1)
+            else:
+                print('using all cepheids ever data')
+    og_df, period, smoothing = clean_old_gloess_file(old_gloess_file)
+
+    """ get the source_id and the gaia epoch photometry """
+    source_id = vs.get_gaia_source_id(target)
+    gaia_df = read_gaia_epoch_photometry_from_query(source_id)
+
+    """ combine the old gloess file with the gaia data """
+    big_df = pd.concat([og_df, gaia_df], ignore_index=True, sort=False)
+    big_df['MJD'] = big_df.apply(lambda x: check_jd_mjd(x.MJD), axis=1)
+
+    """ grab the period from the correct gaia variability table """
+    
+    query_string = f"select {period_col} from gaiadr3.{vartable} where source_id in ({source_id})"
+    job = Gaia.launch_job_async(query_string)
+    if len(job.get_results()) == 0:
+        if np.isnan(alt_period):
+            print(f'{target}: No Gaia period. Please provide an alternative period with the alt_period option')
+            return(-1)
+        else:
+            print(f'{target}: No Gaia period. Using alt_period = {alt_period}')
+            period = alt_period
+    else:
+        period = job.get_results()[period_col][0]
+
+    """ do the gloess fitting on all the bands """
+    filters  = []
+    for i in range(len(big_df.columns)):
+        if big_df.columns[i][0:4] == 'mag_':
+            filt = big_df.columns[i][4:]
+            filters.append(filt)
+    
+    fit_results = np.zeros((len(filters), 500))
+    mag_cols = []
+    for i in range(len(filters)):
+        band = filters[i]
+        mag_col = 'mag_' + band
+        mag_cols.append(mag_col)
+        if len(big_df[mag_col].dropna()) > 0:
+            print(f'band = {band}, n_data = {len(big_df[mag_col].dropna())}, period={period}')
+            err_col = 'err_' + band
+            xx = big_df['MJD']
+            yy = big_df[mag_col]
+            yerr = big_df[err_col]
+            gloess = Gloess(xx, yy, yerr, period, smooth='auto', degree=2)
+            fit_results[i] = gloess.fit_one_band()
+        else: 
+            fit_results[i] = np.ones(500) * np.nan
+
+    if plot==True:
+        
+        fig = plt.figure(figsize=(8,8))
+        ax1 = fig.add_subplot(1,1,1)
+        fake_phases = -0.99 + 0.01*(np.arange(0,500))
+        ax_min = 99.
+        ax_max = -99.
+        glo_cols = {'U' : 'Violet', 'B' : 'MediumSlateBlue', 'V' : 'DodgerBlue', 'R': 'Turquoise', 
+        'I': 'LawnGreen', 'J': 'Gold', 'H': 'DarkOrange', 'Ks' :'Red', 'IRAC1' : 'MediumVioletRed', 
+        'IRAC2' : 'DeepPink', 'IRAC3' :'HotPink', 'IRAC4' : 'PeachPuff', 'G': 'Green', 'BP': 'Blue',
+        'RP': 'Red'}
+        glo_offs = {'U' : 3, 'B' : 1.5, 'V' : 1.2, 'R': 0.7, 'I': 0.2, 'J': 0, 'H': -0.4, 'Ks' :-0.8,
+         'IRAC1' : -1.4, 'IRAC2' : -1.8, 'IRAC3' :-2.2, 'IRAC4' : -2.6, 'G': 6, 'BP': 6, 'RP': 6}
+        for i in range(len(filters)):
+            f = filters[i]
+            mag_col = 'mag_' + f
+            if len(big_df[mag_col].dropna()) > 0:
+                err_col = 'err_' + f    
+                xx = big_df['MJD']
+                yy = big_df[mag_col]
+                yerr = big_df[err_col]
+                xp = gloess.phase_mjds(xx, period)
+                ax1.plot(np.concatenate((xp, xp+1)), np.concatenate((yy,yy))+glo_offs[f], marker='o', ls='None', label=f + ' + ' + str(glo_offs[f]), ms=5, color=glo_cols[f])
+                ax1.plot(fake_phases[200:400]-1, fit_results[i, 200:400]+glo_offs[f], 'k-')
 
 
+                band_min = fit_results[i, 200:300].min()+glo_offs[f]
+                band_max = fit_results[i, 200:300].max()+glo_offs[f]
+
+                if band_min < ax_min:
+                    ax_min = band_min
+                if band_max > ax_max:
+                    ax_max = band_max
+        ax1.set_title(f'{target}, Gaia DR3 {source_id}, P = {period:.5f} d')
+        handles, labels = ax1.get_legend_handles_labels() 
+        ax1.legend(handles[::-1],labels[::-1],bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., numpoints=1)
+        #ax1.legend(handles, labels, mode="expand", borderaxespad=0, ncol=6, bbox_to_anchor=(0, 1.1, 1, 0.2), loc="lower left")
+        ax1.axis([0,2,ax_max+0.2, ax_min-0.2])  
+
+        ax1.set_xlabel('Phase')
+        ax1.set_ylabel('Magnitude')
+
+        if save_pdf==True:
+            plot_file = target.replace(' ', '_') + '_gloess_lc.pdf'
+            plt.savefig(plot_file, bbox_inches="tight")
+    if save_fit==True:
+        fake_phases = -0.99 + 0.01*(np.arange(0,500))
+        df_cols = ['phase'] + mag_cols
+        df_fit = pd.DataFrame(columns=df_cols)
+        df_fit['phase'] = fake_phases[200:400]-1.0
+        for i in range(len(filters)):
+            band = filters[i]
+            mag_col = 'mag_' + band
+            df_fit[mag_col] = fit_results[i, 200:400]
+        fit_csv = target.replace(' ', '_') + '_gloess_fit.csv'
+        df_fit.to_csv(fit_csv, index=False, float_format='%.4f')
+        print(f'Saved gloess fit to {fit_csv}') 
+    if save_df==True:
+        new_gloess_fn = target + '_updated_gloess_data.csv'
+        big_df.to_csv(new_gloess_fn, index=False, header=True)
+        print(f'Saved updated gloess df to {new_gloess_fn}')
+
+    return(fit_results, period, big_df, gloess)
+    
  
