@@ -8,7 +8,6 @@ import astropy.io.votable as vot
 from astroquery.gaia import Gaia
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('../useful_scripts/')
 import vickys_useful_functions as vs
 
 
