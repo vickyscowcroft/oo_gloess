@@ -1,0 +1,36 @@
+band,wavelength_um,zeropoint_Jy,Notes,plotsymbol,plotcolor,offset_old,offset_calc,is_JC_IR,label,ismags
+u,0.3551,,SDSS,^,Violet,,1.9,False,u,True
+U,0.36,1755.0,,o,Violet,3.0,1.9,True,U,True
+B,0.44,4000.87,,o,MediumSlateBlue,1.5,1.5999999999999999,True,B,True
+g,0.4686,,SDSS,^,MediumSlateBlue,,1.5,False,g,True
+BP,0.511,3552.0,Gaia DR3,s,MediumBlue,,1.4,False,Gaia BP,True
+V,0.55,3597.28,,o,DodgerBlue,1.2,1.2,True,V,True
+r,0.6166,,SDSS,^,Teal,,1.0999999999999999,False,r,True
+G,0.622,3229.0,Gaia DR3,s,DarkTurquoise,,1.0999999999999999,False,Gaia G,True
+R,0.71,3080.0,Cousins,o,Turquoise,0.7,0.9,True,R,True
+i,0.748,,SDSS,^,Aquamarine,,0.8,False,i,True
+RP,0.777,2555.0,Gaia DR3,s,PaleGreen,,0.7000000000000001,False,Gaia RP,True
+I,0.79,2432.84,Cousins,o,LawnGreen,0.2,0.7000000000000001,True,I,True
+TESS,0.7965,,TESS wide filter covers approx Rc to z centred on Ic,s,Silver,,0.7000000000000001,False,TESS,True
+z,0.8932,,SDSS,^,greenyellow,,0.5,False,z,True
+J,1.235,1594.0,,o,khaki,0.0,0.0,True,J,True
+H,1.662,1024.0,,o,Gold,-0.4,-0.4,True,H,True
+Ks,2.159,666.7,K short not K,o,DarkOrange,-0.8,-0.7999999999999999,True,K$_s$,True
+K,2.201,631.0,UKIDSS ,o,DarkOrange,-0.8,-0.9,True,K,True
+W1,3.4,309.54,WISE,x,Tomato,-1.4,-1.5,False,W1,True
+IRAC1,3.6,280.9,,o,Tomato,-1.4,-1.6,True,[3.6],True
+IRAC2,4.5,179.7,,o,OrangeRed,-1.8,-2.0,True,[4.5],True
+W2,4.6,171.79,WISE,x,OrangeRed,-1.8,-2.0,False,W2,True
+IRAC3,5.8,115.0,,o,Crimson,-2.2,-2.3000000000000003,True,[5.8],True
+IRAC4,8.0,64.13,,o,DeepPink,-2.6,-2.8000000000000003,True,[8.0],True
+W3,12.0,31.676,WISE,x,MediumVioletRed,,-3.4,False,W3,True
+W4,22.0,8.3635,WISE,x,DarkRed,,-4.3999999999999995,False,W4,True
+Teff,10,10,Teff,o,DarkOrange,,0,False,T$_{eff}$ (K),False
+logg,10,10,logg,o,LawnGreen,,0,False,log g (log (cm s$^{-1}$)),False
+vmic,10,10,vmic,o,DeepPink,,0,False,v$_{mic}$ (km s$^{-1}$),False
+CO_CN,10,10,CO-CN,o,Black,,0,False,CO$ - $CN,False
+CO,10,10,CO,o,Red,,0,False,CO index,False
+CN,10,10,CN,^,Blue,,0,False,CN index,False
+JK,10,10,J-K,o,Black,,0,False,$J-K$,False
+JK_0,10,10,J-K dereddened,o,Black,,0,False,$(J-K)_0$,False
+
