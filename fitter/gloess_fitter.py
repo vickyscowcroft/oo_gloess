@@ -217,7 +217,7 @@ def rising_branch_mean(fit_results, band_num):
 
     return(mean_rising_phase)
 
-def fitted_phases(fit_results, phase_ref_band=None, filters=None, phase_ref_type='rmb', period=None, JD=None):
+def fitted_phases(fit_results, phase_ref_band=None, filters=None, phase_ref_type='rbm', period=None, JD=None):
     """ function to get the offset phases for plotting etc
     input:
         fit_results: fit results from gloess
